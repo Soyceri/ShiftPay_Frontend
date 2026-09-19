@@ -1,29 +1,15 @@
 'use client';
 
 import React from 'react';
-import { PrivyProvider } from '@privy-io/react-auth';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID || 'clxyz1234567890abcdefghij';
+  const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 
   return (
-    <PrivyProvider
-      appId={appId}
-      config={{
-        loginMethods: ['email', 'google'],
-        appearance: {
-          theme: 'dark',
-          accentColor: '#3b82f6',
-          showWalletLoginFirst: false,
-        },
-        embeddedWallets: {
-          ethereum: {
-            createOnLogin: 'users-without-wallets',
-          },
-        },
-      }}
-    >
+    <GoogleOAuthProvider clientId={clientId}>
       {children}
-    </PrivyProvider>
+    </GoogleOAuthProvider>
   );
 }
+
