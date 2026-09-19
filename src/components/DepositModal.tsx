@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, CreditCard, AlertCircle, CheckCircle2, DollarSign } from 'lucide-react';
+import { X, CreditCard, AlertCircle } from 'lucide-react';
 import { depositTL } from '@/services/shiftpay';
 
 export interface DepositModalProps {

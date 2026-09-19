@@ -10,6 +10,7 @@ export default function ShiftPayLogo({ className }: { className?: string }) {
         <div className="absolute -inset-3 bg-cyan-500/35 rounded-full blur-xl animate-pulse pointer-events-none" />
 
         {/* Seamless ShiftPay Logo Image with Screen Blend Mode (Strips Black Box Background) */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/shiftpay-logo.png"
           alt="ShiftPay Logo"

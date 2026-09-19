@@ -13,6 +13,7 @@
     "@react-oauth/google": "^0.13.5",
     "@stellar/stellar-sdk": "^17.1.0",
     "clsx": "^2.1.1",
+    "jsqr": "^1.4.0",
     "lucide-react": "^1.47.0",
     "next": "14.2.35",
     "qrcode.react": "^4.2.0",

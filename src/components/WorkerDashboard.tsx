@@ -51,8 +51,8 @@ export default function WorkerDashboard({
   const [offrampAmount, setOfframpAmount] = useState<string>('');
   const [offrampLoading, setOfframpLoading] = useState<boolean>(false);
 
-  // Canlı veriyi ve kayıtlı IBAN'ı yükle
-  const fetchWorkerData = async () => {
+  // Canlı veriyi ve kayıtlı IBAN&apos;ı yükle
+  const fetchWorkerData = React.useCallback(async () => {
     setLoading(true);
     try {
       const state = await getWorkerState(workerAddress);
@@ -66,11 +66,11 @@ export default function WorkerDashboard({
     } finally {
       setLoading(false);
     }
-  };
+  }, [workerAddress]);
 
   useEffect(() => {
     fetchWorkerData();
-  }, [workerAddress]);
+  }, [fetchWorkerData]);
 
   // QR Taraması Başarıyla Gerçekleştiğinde (Akıllı Algılama & Yönlendirme)
   const handleScanSuccess = async (decodedData: string, detectedType: ScanType) => {
@@ -369,7 +369,7 @@ export default function WorkerDashboard({
               <Building2 className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white">IBAN'a FAST ile TL Çek (SEP-24)</h3>
+              <h3 className="text-sm font-bold text-white">IBAN&apos;a FAST ile TL Çek (SEP-24)</h3>
               <p className="text-[11px] text-slate-400">Hakediş vadesi dolduğunda banka hesabına aktar</p>
             </div>
           </div>
@@ -406,7 +406,7 @@ export default function WorkerDashboard({
             {!isMatured && (
               <div className="p-2.5 bg-slate-950 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 font-medium flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                <span>Vade dolmadığı sürece IBAN'a FAST çekim yapma imkanı pasiftir.</span>
+                <span>Vade dolmadığı sürece IBAN&apos;a FAST çekim yapma imkanı pasiftir.</span>
               </div>
             )}
 

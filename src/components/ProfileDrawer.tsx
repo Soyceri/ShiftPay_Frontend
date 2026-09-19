@@ -43,7 +43,7 @@ export default function ProfileDrawer({
   const [withdrawLoading, setWithdrawLoading] = useState<boolean>(false);
   const [withdrawMsg, setWithdrawMsg] = useState<string | null>(null);
 
-  // Panel açıldığında yerel hafızadan kaydedilmiş IBAN'ı yükle. Yoksa boş ("") getir.
+  // Panel açıldığında yerel hafızadan kaydedilmiş IBAN&apos;ı yükle. Yoksa boş ("") getir.
   useEffect(() => {
     if (isOpen && typeof window !== 'undefined') {
       const storedIban = localStorage.getItem('shiftpay_user_iban');
@@ -316,7 +316,7 @@ export default function ProfileDrawer({
                       {!hasSavedIban ? (
                         <span>FAST nakit çekim için öncelikle bir IBAN adresi kaydetmelisiniz.</span>
                       ) : !isMatured ? (
-                        <span>Hakediş vadesi dolmadığı sürece IBAN'a FAST çekim yapma imkanı pasiftir.</span>
+                        <span>Hakediş vadesi dolmadığı sürece IBAN&apos;a FAST çekim yapma imkanı pasiftir.</span>
                       ) : claimableBalance <= 0 ? (
                         <span>Çekim yapmak için kullanılabilir bakiyeniz bulunmalıdır.</span>
                       ) : null}

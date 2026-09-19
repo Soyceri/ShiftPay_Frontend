@@ -108,9 +108,11 @@ export async function checkIn(
  * İşten çıkışı yapan, günlük hakedişi ekleyip varsa geçmiş borcu otomatik mahsup eden fonksiyon.
  */
 export async function checkOut(
-  employerAddress: string,
-  workerAddress: string
+  employerAddress?: string,
+  workerAddress?: string
 ): Promise<CheckOutResponse> {
+  void employerAddress;
+  void workerAddress;
   await new Promise((resolve) => setTimeout(resolve, 600));
 
   const dailyEarned = 800.0;
