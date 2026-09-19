@@ -1,204 +1,257 @@
 'use client';
 
-import React, { useState } from 'react';
-import { checkIn, spendAtMerchant } from '@/services/shiftpay';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 export interface QRScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  mode: 'checkin' | 'merchant';
-  workerAddress: string;
-  dailyLimitTL?: number;
-  spentTodayTL?: number;
-  onSuccess: (msg: string, updatedState?: { claimable?: number; spentToday?: number }) => void;
+  onScanSuccess: (decodedData: string, scanType: 'CHECK_IN' | 'MERCHANT_PAYMENT') => void;
 }
 
 export default function QRScannerModal({
   isOpen,
   onClose,
-  mode,
-  workerAddress,
-  dailyLimitTL = 800,
-  spentTodayTL = 150,
-  onSuccess,
+  onScanSuccess,
 }: QRScannerModalProps) {
-  const [shiftOrMerchantId, setShiftOrMerchantId] = useState<string>('MOCK-QR-84920');
-  const [amountTL, setAmountTL] = useState<string>('50');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [manualInput, setManualInput] = useState<string>('');
+
+  // Kamerayı durduran yardımcı fonksiyon
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  // Kamerayı başlat
+  const startCamera = useCallback(async () => {
+    setErrorMessage(null);
+    setHasCameraPermission(true);
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Cihazınızın tarayıcısı kamera erişimini desteklemiyor.');
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      });
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (err: unknown) {
+      console.warn('Kamera erişim hatası:', err);
+      setHasCameraPermission(false);
+      const msg = err instanceof Error ? err.message : 'Kamera erişim izni alınamadı.';
+      setErrorMessage(msg);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+
+    return () => {
+      stopCamera();
+    };
+  }, [isOpen, startCamera, stopCamera]);
 
   if (!isOpen) return null;
 
-  const remainingLimit = Math.max(0, dailyLimitTL - spentTodayTL);
-  const isCheckIn = mode === 'checkin';
+  // QR Verisi analiz eden ve tipi otomatik saptayan fonksiyon (Smart Routing)
+  const processDecodedQR = (qrString: string) => {
+    stopCamera();
 
-  const handleScanAndAction = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
+    let scanType: 'CHECK_IN' | 'MERCHANT_PAYMENT' = 'CHECK_IN';
 
     try {
-      if (isCheckIn) {
-        const res = await checkIn(workerAddress, shiftOrMerchantId || 'SHIFT-101');
-        if (res.success) {
-          onSuccess(res.message);
-          onClose();
-        } else {
-          setError(res.message);
-        }
-      } else {
-        const numAmount = parseFloat(amountTL);
-        if (isNaN(numAmount) || numAmount <= 0) {
-          setError('Lütfen harcama için geçerli bir tutar girin.');
-          setLoading(false);
-          return;
-        }
-
-        if (numAmount + spentTodayTL > dailyLimitTL) {
-          setError(`Günlük harcama limitinizi (${dailyLimitTL} TL) aştınız!`);
-          setLoading(false);
-          return;
-        }
-
-        const res = await spendAtMerchant(workerAddress, shiftOrMerchantId || 'MERCHANT-77', numAmount);
-        if (res.success) {
-          onSuccess(res.message, {
-            claimable: res.remainingClaimableTL,
-            spentToday: res.spentTodayTL,
-          });
-          onClose();
-        } else {
-          setError(res.message);
-        }
+      const parsed = JSON.parse(qrString);
+      if (
+        parsed.type === 'MERCHANT' ||
+        parsed.type === 'MERCHANT_PAYMENT' ||
+        parsed.merchantAddress ||
+        parsed.amountTL
+      ) {
+        scanType = 'MERCHANT_PAYMENT';
+      } else if (parsed.type === 'CHECK_IN' || parsed.shiftId) {
+        scanType = 'CHECK_IN';
       }
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'İşlem sırasında hata oluştu.';
-      setError(errorMsg);
-    } finally {
-      setLoading(false);
+    } catch {
+      // JSON değilse string pattern analizi
+      const upper = qrString.toUpperCase();
+      if (upper.includes('MERCHANT') || upper.includes('ESNAF') || upper.includes('PAY')) {
+        scanType = 'MERCHANT_PAYMENT';
+      } else {
+        scanType = 'CHECK_IN';
+      }
+    }
+
+    onScanSuccess(qrString, scanType);
+    onClose();
+  };
+
+  // Test / Simülasyon Butonları
+  const handleSimulateCheckIn = () => {
+    const mockCheckIn = JSON.stringify({
+      type: 'CHECK_IN',
+      shiftId: 'SHIFT-2026-991',
+      employer: 'ShiftPay Holding A.Ş.',
+    });
+    processDecodedQR(mockCheckIn);
+  };
+
+  const handleSimulateMerchant = () => {
+    const mockMerchant = JSON.stringify({
+      type: 'MERCHANT',
+      merchantAddress: 'GMERCHANT...KAFE777',
+      merchantName: 'Simit & Kahve Durağı',
+      amountTL: 120,
+    });
+    processDecodedQR(mockMerchant);
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (manualInput.trim()) {
+      processDecodedQR(manualInput.trim());
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md transition-opacity">
-      <div className="relative w-full max-w-md bg-slate-900/95 border border-slate-800 rounded-3xl p-6 shadow-2xl text-slate-100 backdrop-blur-md">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div className="flex items-center gap-2">
-            <div className={`p-2 rounded-xl ${isCheckIn ? 'bg-blue-500/10 text-blue-400' : 'bg-purple-500/10 text-purple-400'}`}>
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold tracking-tight text-white">
-              {isCheckIn ? 'İşe Giriş (Check-In) QR' : 'Esnafta QR Ödeme'}
-            </h3>
-          </div>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800/60 transition-colors disabled:opacity-50"
-            aria-label="Kapat"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md transition-all">
+      <div className="relative w-full max-w-md bg-slate-900/95 border border-slate-800 rounded-3xl p-6 shadow-2xl text-slate-100 flex flex-col items-center">
+        
+        {/* Kapat Butonu */}
+        <button
+          onClick={() => {
+            stopCamera();
+            onClose();
+          }}
+          className="absolute top-5 right-5 p-2.5 text-slate-400 hover:text-white rounded-full bg-slate-800/80 hover:bg-slate-700 transition-colors z-20"
+          aria-label="Kapat"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        {/* Başlık */}
+        <div className="text-center mb-5 w-full pr-8">
+          <h3 className="text-xl font-bold text-white tracking-tight">Akıllı QR Tarayıcı</h3>
+          <p className="text-xs text-slate-400 mt-1">İşe Giriş veya Esnaf Ödeme QR Kodunu Okutun</p>
         </div>
 
-        {/* Limit Warning (Merchant mode only) */}
-        {!isCheckIn && (
-          <div className="mt-4 p-3.5 bg-purple-500/10 border border-purple-500/30 rounded-2xl flex items-center justify-between text-purple-200">
-            <span className="text-xs font-medium text-purple-300">Kullanılabilir Günlük Harcama Limiti</span>
-            <span className="text-sm font-bold text-purple-200">₺{remainingLimit.toLocaleString('tr-TR')} / ₺{dailyLimitTL}</span>
+        {/* QR Vizör & Kamera Alanı */}
+        <div className="relative w-64 h-64 rounded-3xl border-2 border-cyan-500/60 bg-slate-950 overflow-hidden shadow-2xl flex items-center justify-center">
+          
+          {/* Kamera Canlı Akışı */}
+          {hasCameraPermission ? (
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          ) : (
+            <div className="p-4 text-center space-y-2">
+              <svg className="w-10 h-10 text-amber-400 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <p className="text-xs text-slate-300 font-medium">Kamera Başlatılamadı</p>
+            </div>
+          )}
+
+          {/* Lazer Tarama Çizgisi & Çerçeve Efekti */}
+          <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 z-10">
+            {/* Çerçeve Köşeleri */}
+            <div className="flex justify-between">
+              <div className="w-6 h-6 border-t-2 border-l-2 border-cyan-400 rounded-tl-lg" />
+              <div className="w-6 h-6 border-t-2 border-r-2 border-cyan-400 rounded-tr-lg" />
+            </div>
+
+            {/* Lazer Çizgisi */}
+            <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_12px_#38bdf8] animate-pulse my-auto" />
+
+            <div className="flex justify-between">
+              <div className="w-6 h-6 border-b-2 border-l-2 border-cyan-400 rounded-bl-lg" />
+              <div className="w-6 h-6 border-b-2 border-r-2 border-cyan-400 rounded-br-lg" />
+            </div>
+          </div>
+        </div>
+
+        {/* Hizalama Talimatı */}
+        <p className="text-xs font-semibold text-cyan-300 text-center mt-4">
+          İşveren veya Esnaf QR Kodunu Çerçeveye Hizalayın
+        </p>
+
+        {/* Kamera Uyarısı */}
+        {errorMessage && (
+          <div className="mt-4 w-full p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-200 text-center">
+            {errorMessage}
           </div>
         )}
 
-        {/* QR Vizör Alanı (Simüle) */}
-        <div className="mt-4 flex flex-col items-center">
-          <div className="relative w-44 h-44 rounded-2xl border-2 border-dashed border-cyan-500/50 bg-slate-950/80 flex flex-col items-center justify-center p-4 overflow-hidden group">
-            <div className="absolute inset-2 border border-cyan-400/30 rounded-xl pointer-events-none" />
-            <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-bounce my-auto" />
-            <svg className="w-14 h-14 text-cyan-400/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            <span className="text-[11px] font-medium text-cyan-300/80 mt-2">Kamera QR Bekleniyor...</span>
+        {/* Test & Manuel Simülasyon Alanı */}
+        <div className="mt-5 w-full pt-4 border-t border-slate-800/80 space-y-3">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400">
+            <span>HIZLI TEST SİMÜLASYONU</span>
+            <span className="text-cyan-400">Otomatik Yönlendirmeli</span>
           </div>
-        </div>
 
-        {/* Form Content */}
-        <form onSubmit={handleScanAndAction} className="mt-4 space-y-3.5">
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">
-              {isCheckIn ? 'Vardiya / QR Kimliği' : 'Üye İşyeri QR Kimliği'}
-            </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleSimulateCheckIn}
+              className="py-2.5 px-3 rounded-2xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5"
+            >
+              <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+              </svg>
+              <span>Check-In Tara</span>
+            </button>
+
+            <button
+              onClick={handleSimulateMerchant}
+              className="py-2.5 px-3 rounded-2xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5"
+            >
+              <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+              </svg>
+              <span>Esnaf Ödeme Tara</span>
+            </button>
+          </div>
+
+          <form onSubmit={handleManualSubmit} className="flex gap-2">
             <input
               type="text"
-              required
-              disabled={loading}
-              value={shiftOrMerchantId}
-              onChange={(e) => setShiftOrMerchantId(e.target.value)}
-              className="w-full rounded-2xl bg-slate-950/70 border border-slate-800 py-3 px-4 text-slate-100 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="Manuel QR Metni / JSON Girin"
+              className="flex-1 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
-          </div>
-
-          {!isCheckIn && (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">
-                Ödenecek Tutar (TL)
-              </label>
-              <div className="relative rounded-2xl shadow-sm">
-                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
-                  <span className="text-slate-400 font-bold text-sm">₺</span>
-                </div>
-                <input
-                  type="number"
-                  min="1"
-                  max={remainingLimit}
-                  step="any"
-                  required
-                  disabled={loading}
-                  value={amountTL}
-                  onChange={(e) => setAmountTL(e.target.value)}
-                  className="w-full rounded-2xl bg-slate-950/70 border border-slate-800 py-3 pl-8 pr-4 text-slate-100 text-sm focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 font-semibold"
-                />
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 font-medium">
-              {error}
-            </div>
-          )}
-
-          <div className="pt-2 flex items-center space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={loading}
-              className="w-1/3 py-3 px-4 rounded-2xl border border-slate-800 bg-slate-800/50 hover:bg-slate-800 text-slate-300 font-medium text-sm transition-colors"
-            >
-              İptal
-            </button>
             <button
               type="submit"
-              disabled={loading}
-              className={`w-2/3 py-3 px-4 rounded-2xl text-white font-semibold text-sm transition-all shadow-lg flex items-center justify-center space-x-2 ${
-                isCheckIn
-                  ? 'bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 shadow-blue-950/50'
-                  : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 shadow-purple-950/50'
-              }`}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition-colors"
             >
-              {loading ? (
-                <span>İşleniyor...</span>
-              ) : (
-                <span>{isCheckIn ? 'Girişi Onayla' : 'Ödemeyi Tamamla'}</span>
-              )}
+              İşle
             </button>
-          </div>
-        </form>
+          </form>
+        </div>
+
       </div>
     </div>
   );
