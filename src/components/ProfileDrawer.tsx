@@ -8,11 +8,7 @@ import {
   Copy,
   Check,
   Building2,
-  TrendingUp,
-  CreditCard,
-  ArrowDownRight,
   LogOut,
-  ShieldCheck,
   Zap,
   AlertCircle,
   CheckCircle2,
@@ -38,32 +34,35 @@ export default function ProfileDrawer({
   onLogout,
 }: ProfileDrawerProps) {
   const [copied, setCopied] = useState<boolean>(false);
-  const [iban, setIban] = useState<string>('');
+  const [ibanInput, setIbanInput] = useState<string>('');
   const [savedIban, setSavedIban] = useState<string>('');
-  const [ibanSavedMsg, setIbanSavedMsg] = useState<string | null>(null);
+  const [ibanMsg, setIbanMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // FAST Çekim State'leri
   const [withdrawAmount, setWithdrawAmount] = useState<string>('');
   const [withdrawLoading, setWithdrawLoading] = useState<boolean>(false);
   const [withdrawMsg, setWithdrawMsg] = useState<string | null>(null);
 
-  // Yerel hafızadan kaydedilmiş IBAN'ı yükle
+  // Panel açıldığında yerel hafızadan kaydedilmiş IBAN'ı yükle. Yoksa boş ("") getir.
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (isOpen && typeof window !== 'undefined') {
       const storedIban = localStorage.getItem('shiftpay_user_iban');
       if (storedIban && storedIban.trim().length > 0) {
-        setIban(storedIban);
         setSavedIban(storedIban);
+        setIbanInput(storedIban);
       } else {
-        setIban('');
         setSavedIban('');
+        setIbanInput('');
       }
+      setIbanMsg(null);
+      setWithdrawMsg(null);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleCopyWallet = () => {
+    if (!workerAddress) return;
     navigator.clipboard.writeText(workerAddress);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -71,10 +70,10 @@ export default function ProfileDrawer({
 
   const handleSaveIban = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanIban = iban.trim();
+    const cleanIban = ibanInput.trim().toUpperCase();
 
     if (!cleanIban || cleanIban.length < 10) {
-      setIbanSavedMsg('Lütfen geçerli bir IBAN adresi giriniz.');
+      setIbanMsg({ text: 'Lütfen geçerli bir IBAN adresi giriniz (ör. TR00...).', type: 'error' });
       return;
     }
 
@@ -82,27 +81,30 @@ export default function ProfileDrawer({
       localStorage.setItem('shiftpay_user_iban', cleanIban);
     }
     setSavedIban(cleanIban);
-    setIbanSavedMsg('IBAN adresiniz başarıyla kaydedildi!');
-    setTimeout(() => setIbanSavedMsg(null), 3000);
+    setIbanMsg({ text: 'IBAN adresiniz başarıyla kaydedildi!', type: 'success' });
+    setTimeout(() => setIbanMsg(null), 3000);
   };
 
   const handleFastWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     setWithdrawMsg(null);
-    const amountNum = parseFloat(withdrawAmount);
 
-    if (!savedIban) {
-      setWithdrawMsg('Lütfen öncelikle geçerli bir IBAN kaydedin.');
+    if (!hasSavedIban) {
+      setWithdrawMsg('FAST çekim yapabilmek için öncelikle bir IBAN adresi kaydetmelisiniz.');
       return;
     }
+
     if (!isMatured) {
-      setWithdrawMsg('FAST çekim yapabilmek için bakiyenizin vadesinin dolmuş olması gerekir.');
+      setWithdrawMsg('FAST çekim imkanı vadeniz dolana kadar pasiftir.');
       return;
     }
+
+    const amountNum = parseFloat(withdrawAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
       setWithdrawMsg('Lütfen geçerli bir çekim tutarı giriniz.');
       return;
     }
+
     if (amountNum > claimableBalance) {
       setWithdrawMsg('Çekilmek istenen tutar kullanılabilir bakiyeden fazla olamaz.');
       return;
@@ -111,10 +113,10 @@ export default function ProfileDrawer({
     try {
       setWithdrawLoading(true);
       const { offrampUrl } = await getAnchorOfframpUrl(savedIban, amountNum);
-      setWithdrawMsg('FAST Talebi Oluşturuldu! Anchor portalına yönlendiriliyorsunuz...');
+      setWithdrawMsg('FAST Çekim Talebi Alındı! Portala yönlendiriliyorsunuz...');
       window.open(offrampUrl, '_blank');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'FAST çekim işlemi başlatılamadı.';
+      const msg = err instanceof Error ? err.message : 'FAST çekim başlatılamadı.';
       setWithdrawMsg(`Hata: ${msg}`);
     } finally {
       setWithdrawLoading(false);
@@ -122,87 +124,90 @@ export default function ProfileDrawer({
   };
 
   const hasSavedIban = savedIban.trim().length > 0;
-  const canWithdraw = hasSavedIban && isMatured && claimableBalance > 0;
+  // FAST çekim ancak IBAN kaydedilmişse VE isMatured === true VE bakiye > 0 ise aktiftir
+  const isWithdrawAllowed = hasSavedIban && isMatured && claimableBalance > 0;
 
   const truncatedAddress =
-    workerAddress.length > 12
-      ? `${workerAddress.substring(0, 6)}...${workerAddress.slice(-4)}`
-      : workerAddress;
+    workerAddress && workerAddress.length > 14
+      ? `${workerAddress.substring(0, 6)}...${workerAddress.slice(-6)}`
+      : workerAddress || 'GCRX...SHIFTWORKER9999';
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
-      {/* Yumuşak Cam Efektli Arka Plan (Backdrop Overlay) */}
+      {/* Backdrop Overlay */}
       <div
         onClick={onClose}
-        className="fixed inset-0 bg-black/60 backdrop-blur-md transition-opacity duration-300 animate-fade-in"
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300 animate-fade-in"
       />
 
-      {/* Sağdan Sola Açılan Paneli (Slide-Over Right to Left) */}
+      {/* Slide-over Right Panel */}
       <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-sm bg-slate-900/95 backdrop-blur-xl border-l border-slate-800/80 text-slate-100 flex flex-col justify-between shadow-2xl overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden transform transition-transform duration-300 ease-out">
+        <div className="w-screen max-w-sm bg-slate-900 border-l border-slate-800 text-slate-100 flex flex-col justify-between shadow-2xl overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden transition-all duration-300">
           
-          {/* Drawer Header */}
-          <div className="p-6 border-b border-slate-800/80 flex items-center justify-between sticky top-0 bg-slate-900/95 backdrop-blur-xl z-10">
+          {/* Header */}
+          <div className="p-5 border-b border-slate-800/80 flex items-center justify-between sticky top-0 bg-slate-900/95 backdrop-blur-xl z-20">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                <User className="w-4 h-4 text-white" />
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <User className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-base font-extrabold text-white tracking-tight">Profil & Ayarlar</h2>
-                <p className="text-[11px] text-slate-400 font-medium">ShiftPay FinTech Portalı</p>
+                <h2 className="text-base font-black text-white tracking-tight">Profil & Ayarlar</h2>
+                <p className="text-[11px] text-slate-400 font-medium">ShiftPay FinTech Hesabı</p>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="p-2 text-slate-400 hover:text-white rounded-full bg-slate-800/50 hover:bg-slate-800 transition-colors"
+              className="p-2 text-slate-400 hover:text-white rounded-full bg-slate-800/60 hover:bg-slate-800 transition-colors cursor-pointer"
               aria-label="Kapat"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Body Content */}
-          <div className="p-6 space-y-5 flex-1">
+          {/* Drawer Body */}
+          <div className="p-5 space-y-5 flex-1">
             
-            {/* Kullanıcı Bilgileri Kartı */}
-            <div className="relative overflow-hidden p-5 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 shadow-xl space-y-3">
-              <div className="absolute top-0 right-0 -mt-6 -mr-6 w-24 h-24 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
-              
+            {/* Profil Özeti */}
+            <div className="relative overflow-hidden p-5 rounded-3xl bg-slate-950/80 border border-slate-800 shadow-xl space-y-3">
               <div className="flex items-center gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20">
-                  <div className="w-full h-full rounded-[14px] bg-slate-950 flex items-center justify-center text-white font-black text-base">
-                    MS
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20">
+                  <div className="w-full h-full rounded-[14px] bg-slate-950 flex items-center justify-center text-white font-black text-sm">
+                    İS
                   </div>
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white tracking-tight leading-tight">Mina Soyçeri</h3>
-                  <p className="text-xs text-slate-400 font-medium mt-0.5">mina.soyceri@shiftpay.io</p>
+                  <h3 className="text-sm font-bold text-white tracking-tight">ShiftPay İşçi Kullanıcısı</h3>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">isci@shiftpay.io</p>
                 </div>
               </div>
 
               <div className="pt-3 flex items-center justify-between border-t border-slate-800/80">
-                <span className="text-xs text-slate-400 font-medium">Hesap Durumu</span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  Doğrulanmış İşçi
+                <span className="text-xs text-slate-400 font-medium">Hakedış Vade Durumu</span>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold border ${
+                  isMatured
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${isMatured ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                  {isMatured ? 'Vade Doldu (Çekilebilir)' : 'Vade Bekleniyor'}
                 </span>
               </div>
             </div>
 
-            {/* Stellar / Soroban Cüzdan Kartı */}
-            <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-xl">
+            {/* Stellar / Soroban Cüzdan Adresi */}
+            <div className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3 shadow-xl">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
                   <Wallet className="w-4 h-4 text-cyan-400" />
-                  <span>Stellar Cüzdan Adresi</span>
+                  <span>Stellar/Soroban Cüzdanı</span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-semibold border border-cyan-500/20">
-                  Soroban
+                <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 text-[10px] font-bold border border-cyan-500/20">
+                  On-Chain
                 </span>
               </div>
 
-              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-200">
-                <span className="font-medium text-slate-300">{truncatedAddress}</span>
+              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs font-mono text-slate-200">
+                <span className="font-semibold text-slate-300">{truncatedAddress}</span>
                 <button
                   onClick={handleCopyWallet}
                   className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all flex items-center gap-1 text-[11px] font-sans active:scale-95 cursor-pointer"
@@ -215,54 +220,58 @@ export default function ProfileDrawer({
                     </>
                   ) : (
                     <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span className="font-semibold">Kopyala</span>
+                      <Copy className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="font-bold">Kopyala</span>
                     </>
                   )}
                 </button>
               </div>
             </div>
 
-            {/* Dinamik IBAN Kayıt & Güncelleme Kartı */}
-            <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-3.5 shadow-xl">
+            {/* IBAN Kaydet & Güncelle */}
+            <div className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3.5 shadow-xl">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
                   <Building2 className="w-4 h-4 text-emerald-400" />
-                  <span>Banka IBAN Adresi</span>
+                  <span>Banka IBAN Numarası</span>
                 </div>
                 {hasSavedIban && (
                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-extrabold border border-emerald-500/20 flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3" />
-                    IBAN Kayıtlı (FAST Aktif)
+                    Kayıtlı
                   </span>
                 )}
               </div>
 
               <form onSubmit={handleSaveIban} className="space-y-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
                     FAST İle Çekim Yapılacak IBAN
                   </label>
                   <input
                     type="text"
                     required
-                    value={iban}
-                    onChange={(e) => setIban(e.target.value)}
+                    value={ibanInput}
+                    onChange={(e) => setIbanInput(e.target.value)}
                     placeholder="TR00 0000 0000 0000 0000 0000 00"
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl py-3 px-3.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 px-3.5 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors uppercase"
                   />
                 </div>
 
                 {!hasSavedIban && (
                   <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-[11px] text-amber-300 font-medium flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
-                    <span>Henüz kayıtlı bir IBAN bulunmuyor</span>
+                    <span>Henüz kaydedilmiş bir IBAN bulunmuyor.</span>
                   </div>
                 )}
 
-                {ibanSavedMsg && (
-                  <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-[11px] text-emerald-400 font-semibold animate-fade-in">
-                    {ibanSavedMsg}
+                {ibanMsg && (
+                  <div className={`p-2.5 border rounded-xl text-[11px] font-semibold ${
+                    ibanMsg.type === 'success'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-red-500/10 border-red-500/30 text-red-400'
+                  }`}>
+                    {ibanMsg.text}
                   </div>
                 )}
 
@@ -270,46 +279,46 @@ export default function ProfileDrawer({
                   type="submit"
                   className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-950/50 flex items-center justify-center gap-1.5 active:scale-[0.98] cursor-pointer"
                 >
-                  <span>{hasSavedIban ? 'Güncelle' : 'Kaydet'}</span>
+                  <span>{hasSavedIban ? 'IBAN Adresini Güncelle' : 'IBAN Adresini Kaydet'}</span>
                 </button>
               </form>
             </div>
 
-            {/* FAST Çekim Alanı & Kısıtlar */}
-            <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 space-y-3.5 shadow-xl">
+            {/* FAST ile Çekim ve Kısıtlamalar */}
+            <div className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 space-y-3.5 shadow-xl">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
                 <Zap className="w-4 h-4 text-emerald-400" />
-                <span>IBAN'a FAST ile TL Çek (SEP-24)</span>
+                <span>FAST Nakit Çekim (SEP-24)</span>
               </div>
 
               <form onSubmit={handleFastWithdraw} className="space-y-3">
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">
                     Çekilecek Tutar (TL)
                   </label>
                   <input
                     type="number"
                     min="1"
                     step="any"
-                    disabled={!canWithdraw || withdrawLoading}
+                    disabled={!isWithdrawAllowed || withdrawLoading}
                     value={withdrawAmount}
                     onChange={(e) => setWithdrawAmount(e.target.value)}
                     placeholder="0.00"
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl py-2.5 px-3.5 text-xs font-semibold text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-2.5 px-3.5 text-xs font-bold text-slate-100 placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-40"
                   />
                 </div>
 
-                {/* Kısıt/Uyarı Mesajı */}
-                {!canWithdraw && (
-                  <div className="p-3 bg-slate-950/90 border border-amber-500/30 rounded-2xl text-[11px] text-amber-300 font-medium flex items-start gap-2">
+                {/* Kısıtlama Uyarısı */}
+                {!isWithdrawAllowed && (
+                  <div className="p-3 bg-slate-900 border border-amber-500/30 rounded-2xl text-[11px] text-amber-300 font-medium flex items-start gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
                     <div>
                       {!hasSavedIban ? (
-                        <span>FAST çekim yapmak için lütfen yukarıdaki alana bir IBAN kaydedin.</span>
-                      ) : claimableBalance <= 0 ? (
-                        <span>FAST çekim yapmak için kullanıma uygun hakediş bakiyeniz bulunmalıdır.</span>
+                        <span>FAST nakit çekim için öncelikle bir IBAN adresi kaydetmelisiniz.</span>
                       ) : !isMatured ? (
-                        <span>FAST çekim yapmak için bakiyenizin vadesinin dolmuş olması gerekir.</span>
+                        <span>Hakediş vadesi dolmadığı sürece IBAN'a FAST çekim yapma imkanı pasiftir.</span>
+                      ) : claimableBalance <= 0 ? (
+                        <span>Çekim yapmak için kullanılabilir bakiyeniz bulunmalıdır.</span>
                       ) : null}
                     </div>
                   </div>
@@ -323,14 +332,14 @@ export default function ProfileDrawer({
 
                 <button
                   type="submit"
-                  disabled={!canWithdraw || withdrawLoading}
+                  disabled={!isWithdrawAllowed || withdrawLoading}
                   className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold transition-all shadow-md shadow-emerald-950/50 flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-40 cursor-pointer"
                 >
                   {withdrawLoading ? (
-                    <span>Bağlantı Hazırlanıyor...</span>
+                    <span>Talebiniz İşleniyor...</span>
                   ) : (
                     <>
-                      <span>FAST İle Çekim Yap</span>
+                      <span>FAST İle Nakit Çek</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
@@ -340,8 +349,8 @@ export default function ProfileDrawer({
 
           </div>
 
-          {/* Drawer Footer / Oturumu Kapat */}
-          <div className="p-6 border-t border-slate-800/80 bg-slate-950/80 sticky bottom-0 z-10">
+          {/* Drawer Footer - Oturumu Kapat */}
+          <div className="p-5 border-t border-slate-800/80 bg-slate-950 sticky bottom-0 z-20">
             <button
               onClick={() => {
                 onClose();
@@ -350,7 +359,7 @@ export default function ProfileDrawer({
               className="w-full py-3.5 px-4 rounded-2xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 font-extrabold text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-950/30 active:scale-[0.98] cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
-              <span>Çıkış Yap / Oturumu Kapat</span>
+              <span>Oturumu Kapat</span>
             </button>
           </div>
 
@@ -359,3 +368,4 @@ export default function ProfileDrawer({
     </div>
   );
 }
+
