@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Menu, Zap, QrCode, ArrowRight, ShieldCheck, Info } from 'lucide-react';
+import { Menu, Zap, QrCode, ArrowRight, ShieldCheck } from 'lucide-react';
 import {
   getWorkerState,
   checkIn,
@@ -31,7 +31,7 @@ export default function WorkerDashboard({
   // QR Modal State
   const [isQRModalOpen, setIsQRModalOpen] = useState<boolean>(false);
 
-  // Drawers & Other Modals
+  // Drawers & Modals
   const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
   const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState<boolean>(false);
 
@@ -52,7 +52,7 @@ export default function WorkerDashboard({
   const [offrampAmount, setOfframpAmount] = useState<string>('0');
   const [offrampLoading, setOfframpLoading] = useState<boolean>(false);
 
-  // Sayfa yüklendiğinde canlı sıfır verisini çek
+  // Sayfa yüklendiğinde canlı veriyi çek
   const fetchWorkerData = async () => {
     setLoading(true);
     try {
@@ -185,7 +185,7 @@ export default function WorkerDashboard({
     try {
       setOfframpLoading(true);
       const { offrampUrl } = await getAnchorOfframpUrl(activeIban, amountNum);
-      setActionMessage(`FAST Talebi Oluşturuldu! Anchor linkine yönlendiriliyorsunuz...`);
+      setActionMessage(`FAST Talebi Oluşturuldu! Anchor portalına yönlendiriliyorsunuz...`);
       window.open(offrampUrl, '_blank');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'FAST çekim bağlantısı oluşturulamadı.';
@@ -206,7 +206,7 @@ export default function WorkerDashboard({
   return (
     <div className="min-h-screen w-full bg-[#0b0f19] text-slate-100 flex flex-col font-sans pb-12">
       
-      {/* Mobil Header: Sol üstte ⚡ ShiftPay logosu, Sağ üstte Profil Menü Butonu */}
+      {/* Mobil Header */}
       <header className="sticky top-0 z-30 w-full px-4 sm:px-6 py-4 bg-slate-900/90 backdrop-blur-xl border-b border-slate-800/80 flex items-center justify-between shadow-xl">
         <div className="flex items-center gap-2.5">
           <div className="relative group flex items-center justify-center">
@@ -279,31 +279,19 @@ export default function WorkerDashboard({
 
             <button
               onClick={() => setIsDepositModalOpen(true)}
-              className="shrink-0 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-950/60 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+              className="shrink-0 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-slate-950 font-extrabold text-xs shadow-lg shadow-amber-950/60 transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
             >
               Borç Kapat
             </button>
           </div>
         )}
 
-        {/* Bakiye Kartı & Dinamik Vade Durumu */}
+        {/* Bakiye Kartı */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 p-6 shadow-2xl">
           <div className="absolute top-0 right-0 -mt-8 -mr-8 w-36 h-36 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
 
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
             <span>KİLİTLİ HAKEDİŞ BAKİYESİ</span>
-            {/* Sadece bakiye > 0 ₺ olduğunda vade durumu rozetini göster */}
-            {claimableBalance > 0 && (
-              isMatured ? (
-                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                  ✅ Vade Doldu — Hesabınıza FAST ile IBAN'a çekebilirsiniz.
-                </span>
-              ) : (
-                <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[11px] font-bold">
-                  ⏳ Vade Dolmadı — Anlaşmalı yerlerde QR ile harcayabilirsiniz.
-                </span>
-              )
-            )}
           </div>
 
           <div className="mt-3 flex items-baseline gap-2">
@@ -316,17 +304,16 @@ export default function WorkerDashboard({
           </div>
         </div>
 
-        {/* Bakiye 0,00 ₺ iken Görünür Minimalist Bilgilendirme Rozeti */}
-        {claimableBalance <= 0 && (
-          <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800/80 flex items-center gap-3 text-xs text-slate-400 shadow-md">
-            <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 shrink-0">
-              <Info className="w-4 h-4" />
-            </div>
-            <span>
-              Henüz aktif vardiya bulunmuyor. İşe giriş yapmak veya harcama yapmak için <strong>QR Okut</strong> butonunu kullanın.
-            </span>
-          </div>
-        )}
+        {/* Tek Evrensel 'QR Okut' Butonu Kartı (Bakiye Kartının Hemen Altında) */}
+        <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl">
+          <button
+            onClick={() => setIsQRModalOpen(true)}
+            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-sm sm:text-base shadow-lg shadow-cyan-500/20 transform hover:scale-[1.01] active:scale-[0.98] transition-all flex items-center justify-center gap-3 cursor-pointer"
+          >
+            <QrCode className="w-6 h-6 text-white shrink-0" />
+            <span>QR Okut (Alışveriş, İşe Giriş, İş Çıkış)</span>
+          </button>
+        </div>
 
         {/* GÜNLÜK HARCAMA LİMİTİ Kartı */}
         <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-3">
@@ -366,17 +353,6 @@ export default function WorkerDashboard({
             <span>Harcanan: ₺{spentToday}</span>
             <span>Kalan Limit: ₺{remainingToday}</span>
           </div>
-        </div>
-
-        {/* Tek Evrensel 'QR Okut' Butonu Kartı (IBAN Kartının Hemen Üstünde) */}
-        <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl">
-          <button
-            onClick={() => setIsQRModalOpen(true)}
-            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-sm sm:text-base shadow-lg shadow-cyan-500/20 transform hover:scale-[1.01] active:scale-[0.98] transition-all flex items-center justify-center gap-3 cursor-pointer"
-          >
-            <QrCode className="w-6 h-6 text-white shrink-0" />
-            <span>QR Okut (Alışveriş, İşe Giriş, İş Çıkış)</span>
-          </button>
         </div>
 
         {/* IBAN FAST ile TL Çek (SEP-24 Entegrasyonu) */}
@@ -425,7 +401,7 @@ export default function WorkerDashboard({
             <button
               type="submit"
               disabled={offrampLoading || claimableBalance <= 0 || !isMatured}
-              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-semibold text-sm shadow-lg shadow-emerald-950/50 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-semibold text-sm shadow-lg shadow-emerald-950/50 transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
             >
               {offrampLoading ? (
                 <span>Bağlantı Hazırlanıyor...</span>
