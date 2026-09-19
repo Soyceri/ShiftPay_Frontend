@@ -8,6 +8,7 @@ export interface WorkerState {
   claimableBalance: number; // Kilitli hakediş bakiyesi (TL / Stellar Asset)
   debtTL: number;           // Varsa borç durumu (TL)
   isVested: boolean;        // Vadesinin dolup dolmadığı
+  isMatured: boolean;       // Vadesinin dolup dolmadığı (Vade Durumu)
   dailyLimitTL: number;     // Günlük harcama limiti (TL)
   spentTodayTL: number;     // Bugün harcanan toplam tutar (TL)
 }
@@ -28,6 +29,7 @@ export interface CheckOutResponse extends TransactionResult {
   deductedDebtTL: number;
   remainingClaimableTL: number;
   remainingDebtTL: number;
+  isMatured: boolean;
 }
 
 export interface MerchantPaymentResponse extends TransactionResult {
@@ -37,21 +39,26 @@ export interface MerchantPaymentResponse extends TransactionResult {
   spentTodayTL?: number;
 }
 
-// In-memory state tracking for mock consistency during session
-let mockSpentToday = 150.0;
+// In-memory state tracking for production initial state
+let mockSpentToday = 0.0;
+let mockClaimableBalance = 0.0;
+let mockDebtTL = 0.0;
+let mockIsMatured = false;
 const MOCK_DAILY_LIMIT = 800.0;
 
 /**
  * İşçinin kilitli hakediş bakiyesini, borç durumunu, vade doluluk bilgisini ve günlük limit durumunu getirir.
+ * Canlı başlangıç modunda varsayılan bakiye 0.00 TL ve borç 0.00 TL olarak başlar.
  */
 export async function getWorkerState(workerAddress: string): Promise<WorkerState> {
   await new Promise((resolve) => setTimeout(resolve, 300));
 
   return {
     workerAddress,
-    claimableBalance: 1250.0,
-    debtTL: 300.0,
-    isVested: true,
+    claimableBalance: mockClaimableBalance,
+    debtTL: mockDebtTL,
+    isVested: mockIsMatured,
+    isMatured: mockIsMatured,
     dailyLimitTL: MOCK_DAILY_LIMIT,
     spentTodayTL: mockSpentToday,
   };
@@ -66,12 +73,16 @@ export async function depositTL(
 ): Promise<TransactionResult & { newDebtTL: number; newClaimableBalance: number }> {
   await new Promise((resolve) => setTimeout(resolve, 500));
 
+  mockDebtTL = Math.max(0, mockDebtTL - amountTL);
+  mockClaimableBalance += amountTL;
+  mockIsMatured = true;
+
   return {
     success: true,
-    message: `${amountTL} TL borç ödemesi başarıyla gerçekleştirildi.`,
+    message: `${amountTL} TL yükleme / borç ödemesi başarıyla gerçekleştirildi.`,
     txHash: '0x' + Math.random().toString(16).substring(2, 42),
-    newDebtTL: 0,
-    newClaimableBalance: 1450.0,
+    newDebtTL: mockDebtTL,
+    newClaimableBalance: mockClaimableBalance,
   };
 }
 
@@ -103,17 +114,22 @@ export async function checkOut(
   await new Promise((resolve) => setTimeout(resolve, 600));
 
   const dailyEarned = 800.0;
-  const currentDebt = 300.0;
+  const currentDebt = mockDebtTL;
   const deducted = Math.min(dailyEarned, currentDebt);
   const netEarnings = dailyEarned - deducted;
+
+  mockDebtTL = currentDebt - deducted;
+  mockClaimableBalance += netEarnings;
+  mockIsMatured = true; // Vardiya tamamlandığında hakediş kilitli süreci dolar veya FAST çekimine uygun hale gelir
 
   return {
     success: true,
     message: 'İşten çıkış (Check-Out) tamamlandı. Günlük hakediş hesaba işlendi.',
     earnedTL: dailyEarned,
     deductedDebtTL: deducted,
-    remainingClaimableTL: 1250.0 + netEarnings,
-    remainingDebtTL: currentDebt - deducted,
+    remainingClaimableTL: mockClaimableBalance,
+    remainingDebtTL: mockDebtTL,
+    isMatured: true,
     txHash: '0x' + Math.random().toString(16).substring(2, 42),
   };
 }
@@ -138,13 +154,14 @@ export async function spendAtMerchant(
   }
 
   mockSpentToday += amountTL;
+  mockClaimableBalance = Math.max(0, mockClaimableBalance - amountTL);
 
   return {
     success: true,
     message: `${amountTL} TL tutarındaki ödeme üye işyerinde başarıyla gerçekleştirildi.`,
     amountTL,
     merchantAddress,
-    remainingClaimableTL: 1250.0 - amountTL,
+    remainingClaimableTL: mockClaimableBalance,
     spentTodayTL: mockSpentToday,
     txHash: '0x' + Math.random().toString(16).substring(2, 42),
   };

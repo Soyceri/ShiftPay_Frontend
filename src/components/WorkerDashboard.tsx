@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Menu, Zap, User } from 'lucide-react';
+import { Menu, Zap, QrCode, ArrowRight, ShieldCheck, Info } from 'lucide-react';
 import {
   getWorkerState,
   checkIn,
@@ -11,8 +11,9 @@ import {
   WorkerState,
 } from '@/services/shiftpay';
 import DepositModal from '@/components/DepositModal';
-import QRScannerModal from '@/components/QRScannerModal';
+import QRScannerModal, { ScanType } from '@/components/QRScannerModal';
 import ProfileDrawer from '@/components/ProfileDrawer';
+import MerchantPaymentModal from '@/components/MerchantPaymentModal';
 
 export interface WorkerDashboardProps {
   workerAddress?: string;
@@ -26,19 +27,32 @@ export default function WorkerDashboard({
   const [workerState, setWorkerState] = useState<WorkerState | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [checkOutLoading, setCheckOutLoading] = useState<boolean>(false);
 
-  // Modals & Drawers
-  const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
+  // QR Modal State
   const [isQRModalOpen, setIsQRModalOpen] = useState<boolean>(false);
+
+  // Drawers & Other Modals
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
   const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState<boolean>(false);
 
+  // Merchant Payment Confirmation Modal State
+  const [isMerchantModalOpen, setIsMerchantModalOpen] = useState<boolean>(false);
+  const [pendingMerchant, setPendingMerchant] = useState<{
+    address: string;
+    name: string;
+    amountTL: number;
+  }>({
+    address: 'GMERCHANT...KAFE777',
+    name: 'Simit & Kahve Durağı',
+    amountTL: 120,
+  });
+
   // SEP-24 FAST Off-ramp state
-  const [iban, setIban] = useState<string>('TR33 0006 1000 0000 1234 5678 90');
-  const [offrampAmount, setOfframpAmount] = useState<string>('500');
+  const [iban, setIban] = useState<string>('');
+  const [offrampAmount, setOfframpAmount] = useState<string>('0');
   const [offrampLoading, setOfframpLoading] = useState<boolean>(false);
 
-  // Sayfa yüklendiğinde veriyi ve kaydedilmiş IBAN'ı çek
+  // Sayfa yüklendiğinde canlı sıfır verisini çek
   const fetchWorkerData = async () => {
     setLoading(true);
     try {
@@ -59,12 +73,12 @@ export default function WorkerDashboard({
     fetchWorkerData();
   }, [workerAddress]);
 
-  // QR Taraması Başarıyla Gerçekleştiğinde (Akıllı Yönlendirme)
-  const handleScanSuccess = async (decodedData: string, scanType: 'CHECK_IN' | 'MERCHANT_PAYMENT') => {
+  // QR Taraması Başarıyla Gerçekleştiğinde (Otomatik Algılama & Yönlendirme)
+  const handleScanSuccess = async (decodedData: string, detectedType: ScanType) => {
     setActionMessage(null);
 
     try {
-      if (scanType === 'CHECK_IN') {
+      if (detectedType === 'CHECK_IN') {
         let shiftId = 'SHIFT-101';
         try {
           const parsed = JSON.parse(decodedData);
@@ -75,45 +89,50 @@ export default function WorkerDashboard({
 
         const res = await checkIn(workerAddress, shiftId);
         if (res.success) {
-          setActionMessage(res.message);
+          setActionMessage(`⚡ ${res.message} (Vardiya ID: ${shiftId})`);
         } else {
           setActionMessage(`Check-In Hatası: ${res.message}`);
         }
-      } else {
-        // Esnaf Harcama İşlemi
+      } else if (detectedType === 'MERCHANT_PAYMENT') {
         let merchantAddress = 'GMERCHANT...KAFE777';
+        let merchantName = 'Simit & Kahve Durağı';
         let amountTL = 120;
 
         try {
           const parsed = JSON.parse(decodedData);
           if (parsed.merchantAddress) merchantAddress = parsed.merchantAddress;
+          if (parsed.merchantName) merchantName = parsed.merchantName;
           if (parsed.amountTL) amountTL = parseFloat(parsed.amountTL);
         } catch {
-          // varsayılan mock tutar
+          // varsayılan değerler
         }
 
-        const dailyLimit = workerState?.dailyLimitTL ?? 800;
-        const spentToday = workerState?.spentTodayTL ?? 150;
+        setPendingMerchant({
+          address: merchantAddress,
+          name: merchantName,
+          amountTL: amountTL || 120,
+        });
+        setIsMerchantModalOpen(true);
 
-        if (amountTL + spentToday > dailyLimit) {
-          setActionMessage(`Günlük harcama limitinizi (${dailyLimit} TL) aştınız! (Bugün Harcanan: ${spentToday} TL)`);
-          return;
-        }
-
-        const res = await spendAtMerchant(workerAddress, merchantAddress, amountTL);
+      } else if (detectedType === 'CHECK_OUT') {
+        const res = await checkOut(employerAddress, workerAddress);
         if (res.success) {
-          setActionMessage(res.message);
           setWorkerState((prev) =>
             prev
               ? {
                   ...prev,
-                  claimableBalance: res.remainingClaimableTL ?? prev.claimableBalance,
-                  spentTodayTL: res.spentTodayTL ?? prev.spentTodayTL,
+                  claimableBalance: res.remainingClaimableTL,
+                  debtTL: res.remainingDebtTL,
+                  isVested: true,
+                  isMatured: true,
                 }
               : null
           );
+          setActionMessage(
+            `🎉 Vardiya Tamamlandı! Kazanılan: ₺${res.earnedTL}, Mahsup Edilen Borç: ₺${res.deductedDebtTL}`
+          );
         } else {
-          setActionMessage(`Ödeme Hatası: ${res.message}`);
+          setActionMessage(`Çıkış Hatası: ${res.message}`);
         }
       }
     } catch (err: unknown) {
@@ -122,41 +141,35 @@ export default function WorkerDashboard({
     }
   };
 
-  // Check-Out işlemi
-  const handleCheckOut = async () => {
-    setCheckOutLoading(true);
+  const handleConfirmMerchantPayment = async (amountTL: number) => {
     setActionMessage(null);
-    try {
-      const res = await checkOut(employerAddress, workerAddress);
-      if (res.success) {
-        setWorkerState((prev) =>
-          prev
-            ? {
-                ...prev,
-                claimableBalance: res.remainingClaimableTL,
-                debtTL: res.remainingDebtTL,
-              }
-            : null
-        );
-        setActionMessage(
-          `Vardiya Tamamlandı! Kazanılan: ₺${res.earnedTL}, Mahsup Edilen Borç: ₺${res.deductedDebtTL}`
-        );
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Çıkış işlemi başarısız oldu.';
-      setActionMessage(`Hata: ${msg}`);
-    } finally {
-      setCheckOutLoading(false);
+    const res = await spendAtMerchant(workerAddress, pendingMerchant.address, amountTL);
+
+    if (res.success) {
+      setActionMessage(`🛒 Ödeme Başarılı! ${pendingMerchant.name} mağazasında ₺${amountTL} harcandı.`);
+      setWorkerState((prev) =>
+        prev
+          ? {
+              ...prev,
+              claimableBalance: res.remainingClaimableTL ?? prev.claimableBalance,
+              spentTodayTL: res.spentTodayTL ?? prev.spentTodayTL,
+            }
+          : null
+      );
+    } else {
+      setActionMessage(`Ödeme Hatası: ${res.message}`);
     }
   };
 
-  // SEP-24 Fast TL Çekilme İşlemi
   const handleOfframp = async (e: React.FormEvent) => {
     e.preventDefault();
     setActionMessage(null);
     const amountNum = parseFloat(offrampAmount);
 
-    if (!iban || iban.trim().length < 10) {
+    const savedIban = typeof window !== 'undefined' ? localStorage.getItem('shiftpay_user_iban') : iban;
+    const activeIban = savedIban || iban;
+
+    if (!activeIban || activeIban.trim().length < 10) {
       setActionMessage('Lütfen geçerli bir IBAN giriniz.');
       return;
     }
@@ -171,7 +184,7 @@ export default function WorkerDashboard({
 
     try {
       setOfframpLoading(true);
-      const { offrampUrl } = await getAnchorOfframpUrl(iban, amountNum);
+      const { offrampUrl } = await getAnchorOfframpUrl(activeIban, amountNum);
       setActionMessage(`FAST Talebi Oluşturuldu! Anchor linkine yönlendiriliyorsunuz...`);
       window.open(offrampUrl, '_blank');
     } catch (err: unknown) {
@@ -184,20 +197,20 @@ export default function WorkerDashboard({
 
   const hasDebt = (workerState?.debtTL ?? 0) > 0;
   const dailyLimit = workerState?.dailyLimitTL ?? 800;
-  const spentToday = workerState?.spentTodayTL ?? 150;
+  const spentToday = workerState?.spentTodayTL ?? 0;
   const remainingToday = Math.max(0, dailyLimit - spentToday);
   const spentPercentage = Math.min(100, Math.round((spentToday / dailyLimit) * 100));
+  const claimableBalance = workerState?.claimableBalance ?? 0;
+  const isMatured = workerState?.isMatured ?? false;
 
   return (
     <div className="min-h-screen w-full bg-[#0b0f19] text-slate-100 flex flex-col font-sans pb-12">
       
-      {/* Mobil Header: Sol üstte Logo (⚡ S hiftPay), Sağ üstte Profil / Menü Butonu */}
-      <header className="sticky top-0 z-40 w-full px-4 sm:px-6 py-4 bg-slate-900/90 backdrop-blur-xl border-b border-slate-800/80 flex items-center justify-between shadow-xl">
-        
-        {/* Sol Üst Logo: ⚡ ShiftPay */}
+      {/* Mobil Header: Sol üstte ⚡ ShiftPay logosu, Sağ üstte Profil Menü Butonu */}
+      <header className="sticky top-0 z-30 w-full px-4 sm:px-6 py-4 bg-slate-900/90 backdrop-blur-xl border-b border-slate-800/80 flex items-center justify-between shadow-xl">
         <div className="flex items-center gap-2.5">
           <div className="relative group flex items-center justify-center">
-            <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 rounded-2xl blur-md opacity-70 group-hover:opacity-100 transition-opacity" />
+            <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-2xl blur-md opacity-70 group-hover:opacity-100 transition-opacity" />
             <div className="relative w-9 h-9 rounded-xl bg-slate-950 p-[1px] border border-cyan-400/30 flex items-center justify-center">
               <div className="w-full h-full rounded-[10px] bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center">
                 <Zap className="w-5 h-5 text-white fill-white shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
@@ -210,14 +223,10 @@ export default function WorkerDashboard({
             <span className="text-xl font-bold bg-gradient-to-r from-slate-100 via-slate-200 to-cyan-300 bg-clip-text text-transparent tracking-tight">
               hiftPay
             </span>
-            <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-              Ağ Aktif
-            </span>
           </div>
         </div>
 
-        {/* Sağ Üst Profil / Menü Butonu */}
+        {/* Sağ Üst Profil Butonu */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setIsProfileDrawerOpen(true)}
@@ -232,23 +241,26 @@ export default function WorkerDashboard({
         </div>
       </header>
 
-      {/* Ana Mobil İletişim & İşlemler Konteyneri */}
+      {/* Ana Mobil İçerik Konteyneri */}
       <main className="flex-1 max-w-lg w-full mx-auto px-4 pt-6 space-y-5">
 
-        {/* Bildirim / İşlem Mesajı */}
+        {/* Bildirim Mesajı */}
         {actionMessage && (
-          <div className="p-4 rounded-2xl bg-slate-900 border border-cyan-500/30 text-cyan-300 text-xs sm:text-sm flex items-start justify-between shadow-lg animate-fade-in">
-            <span>{actionMessage}</span>
+          <div className="p-4 rounded-2xl bg-slate-900 border border-cyan-500/40 text-cyan-300 text-xs sm:text-sm flex items-start justify-between shadow-xl animate-fade-in">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-cyan-400 shrink-0" />
+              <span>{actionMessage}</span>
+            </div>
             <button
               onClick={() => setActionMessage(null)}
-              className="text-slate-400 hover:text-white ml-2"
+              className="text-slate-400 hover:text-white ml-2 shrink-0 font-bold"
             >
               ✕
             </button>
           </div>
         )}
 
-        {/* Borç Uyarısı & Borç Kapat Butonu Kartı (Sadece borç varsa görünür) */}
+        {/* Borç Uyarısı Kartı (Sadece Borç Varsa Görünür) */}
         {hasDebt && (
           <div className="p-5 rounded-3xl bg-gradient-to-r from-amber-950/70 via-slate-900 to-red-950/50 border border-amber-500/50 text-amber-200 shadow-xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -274,20 +286,23 @@ export default function WorkerDashboard({
           </div>
         )}
 
-        {/* Bakiye Kartı */}
+        {/* Bakiye Kartı & Dinamik Vade Durumu */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-slate-950 border border-slate-800 p-6 shadow-2xl">
           <div className="absolute top-0 right-0 -mt-8 -mr-8 w-36 h-36 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
 
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400">
             <span>KİLİTLİ HAKEDİŞ BAKİYESİ</span>
-            {workerState?.isVested ? (
-              <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px]">
-                Vadesi Doldu (Kullanılabilir)
-              </span>
-            ) : (
-              <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[11px]">
-                Kilitli Süreçte
-              </span>
+            {/* Sadece bakiye > 0 ₺ olduğunda vade durumu rozetini göster */}
+            {claimableBalance > 0 && (
+              isMatured ? (
+                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                  ✅ Vade Doldu — Hesabınıza FAST ile IBAN'a çekebilirsiniz.
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[11px] font-bold">
+                  ⏳ Vade Dolmadı — Anlaşmalı yerlerde QR ile harcayabilirsiniz.
+                </span>
+              )
             )}
           </div>
 
@@ -295,11 +310,23 @@ export default function WorkerDashboard({
             <span className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
               {loading
                 ? '...'
-                : `₺${workerState?.claimableBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`}
+                : `₺${claimableBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`}
             </span>
             <span className="text-xs font-semibold text-slate-400">TL</span>
           </div>
         </div>
+
+        {/* Bakiye 0,00 ₺ iken Görünür Minimalist Bilgilendirme Rozeti */}
+        {claimableBalance <= 0 && (
+          <div className="p-4 rounded-3xl bg-slate-900/60 border border-slate-800/80 flex items-center gap-3 text-xs text-slate-400 shadow-md">
+            <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 shrink-0">
+              <Info className="w-4 h-4" />
+            </div>
+            <span>
+              Henüz aktif vardiya bulunmuyor. İşe giriş yapmak veya harcama yapmak için <strong>QR Okut</strong> butonunu kullanın.
+            </span>
+          </div>
+        )}
 
         {/* GÜNLÜK HARCAMA LİMİTİ Kartı */}
         <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl space-y-3">
@@ -322,7 +349,6 @@ export default function WorkerDashboard({
             </span>
           </div>
 
-          {/* Progress Bar */}
           <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800">
             <div
               className={`h-full rounded-full transition-all duration-500 ${
@@ -342,45 +368,14 @@ export default function WorkerDashboard({
           </div>
         </div>
 
-        {/* Akıllı QR Tarayıcı Aç Butonu */}
-        <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl text-center">
+        {/* Tek Evrensel 'QR Okut' Butonu Kartı (IBAN Kartının Hemen Üstünde) */}
+        <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl">
           <button
             onClick={() => setIsQRModalOpen(true)}
-            className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-purple-600 hover:from-cyan-600 hover:to-purple-700 text-white font-extrabold text-sm shadow-xl shadow-cyan-950/50 transition-all flex items-center justify-center gap-3 transform hover:scale-[1.01] active:scale-[0.98]"
+            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-sm sm:text-base shadow-lg shadow-cyan-500/20 transform hover:scale-[1.01] active:scale-[0.98] transition-all flex items-center justify-center gap-3 cursor-pointer"
           >
-            <div className="p-1.5 rounded-xl bg-white/10">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-              </svg>
-            </div>
-            <span>Akıllı QR Tarayıcıyı Aç (Giriş & Ödeme)</span>
-          </button>
-        </div>
-
-        {/* Vardiyayı Bitir (Check-Out) Butonu */}
-        <div className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-xl">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-sm font-bold text-white">Vardiya Durumu</h3>
-              <p className="text-xs text-slate-400">İşten çıkış yaparak günlük hakedişinizi işleyin.</p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleCheckOut}
-            disabled={checkOutLoading}
-            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-sm shadow-lg shadow-blue-950/50 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {checkOutLoading ? (
-              <span>İşleniyor...</span>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-                <span>Vardiyayı Bitir / İşten Çık (Check-Out)</span>
-              </>
-            )}
+            <QrCode className="w-6 h-6 text-white shrink-0" />
+            <span>QR Okut (Alışveriş, İşe Giriş, İş Çıkış)</span>
           </button>
         </div>
 
@@ -429,7 +424,7 @@ export default function WorkerDashboard({
 
             <button
               type="submit"
-              disabled={offrampLoading}
+              disabled={offrampLoading || claimableBalance <= 0 || !isMatured}
               className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-semibold text-sm shadow-lg shadow-emerald-950/50 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {offrampLoading ? (
@@ -437,9 +432,7 @@ export default function WorkerDashboard({
               ) : (
                 <>
                   <span>FAST İle Çekim Yap (SEP-24)</span>
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
+                  <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
@@ -453,6 +446,8 @@ export default function WorkerDashboard({
         isOpen={isProfileDrawerOpen}
         onClose={() => setIsProfileDrawerOpen(false)}
         workerAddress={workerAddress}
+        claimableBalance={claimableBalance}
+        isMatured={isMatured}
         onLogout={() => setActionMessage('Oturum kapatıldı.')}
       />
 
@@ -478,7 +473,19 @@ export default function WorkerDashboard({
         />
       )}
 
-      {/* QR Scanner Modal (Dinamik Akıllı Yönlendirme) */}
+      {/* Esnaf Tutar Onay Modalı */}
+      <MerchantPaymentModal
+        isOpen={isMerchantModalOpen}
+        onClose={() => setIsMerchantModalOpen(false)}
+        merchantAddress={pendingMerchant.address}
+        merchantName={pendingMerchant.name}
+        scannedAmountTL={pendingMerchant.amountTL}
+        dailyLimitTL={dailyLimit}
+        spentTodayTL={spentToday}
+        onConfirmPayment={handleConfirmMerchantPayment}
+      />
+
+      {/* QR Scanner Modal (Evrensel Kamera) */}
       <QRScannerModal
         isOpen={isQRModalOpen}
         onClose={() => setIsQRModalOpen(false)}
