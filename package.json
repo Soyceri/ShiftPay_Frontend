@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@privy-io/react-auth": "^3.44.0",
     "@react-oauth/google": "^0.13.5",
     "@stellar/stellar-sdk": "^17.1.0",
     "clsx": "^2.1.1",
